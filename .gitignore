@@ -322,3 +322,7 @@ native/fts5_cjk/*.so
 /pm/.lock.json.lock
 
 apps/desktop/.dist-build*
+
+# GitNexus analysis artifacts (kept on disk, not tracked)
+/.claude/
+/CLAUDE.md
