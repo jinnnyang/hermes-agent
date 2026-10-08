@@ -1773,6 +1773,19 @@ def _apply_pulled_update(
     _complete_source_update(completion_request)
 
 
+def _sync_omniroute_plugins(git_cmd, root) -> None:
+    """Best-effort refresh of the OmniRoute provider plugins after an update.
+
+    Never fails the update: plugin refresh is best-effort (network, repo, or
+    permission trouble only prints a note). Jinnnyang fork (B: update auto-deploy).
+    """
+    try:
+        from hermes_cli.omniroute_sync import sync_omniroute_plugins
+        sync_omniroute_plugins(root, git_cmd)
+    except Exception as exc:  # health: allow BLE001 -- omniroute plugin sync is best-effort and must never fail the update
+        print(f"  (omniroute plugins sync skipped: {exc})")
+
+
 def _cmd_update_impl(args, gateway_mode: bool):
     """Apply the update; the command boundary owns errors, receipts and stdio."""
     # Marks this frame as the CURRENT updater for
@@ -1943,6 +1956,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
             _finish_already_up_to_date(
                 git_cmd, branch, current_branch, _plan, gw_input_fn=gw_input_fn,
                 completion_request=completion_request, _windows_gateway_resume=_windows_gateway_resume)
+            _sync_omniroute_plugins(git_cmd, _m().PROJECT_ROOT)
             return
 
         if release_sha:
@@ -1967,6 +1981,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
         _apply_pulled_update(
             git_cmd, branch, movement_baseline, _plan,
             _windows_gateway_resume=_windows_gateway_resume, completion_request=completion_request)
+        _sync_omniroute_plugins(git_cmd, _m().PROJECT_ROOT)
     except subprocess.CalledProcessError as e:
         try:
             _handle_update_called_process_error(
