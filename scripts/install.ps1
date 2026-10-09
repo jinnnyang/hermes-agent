@@ -31,6 +31,11 @@ param(
     [switch]$SkipSetup,
     [switch]$Json,
     [switch]$IncludeDesktop,
+    # OmniRoute provider plugins ship as a standalone repo; default ON so fork
+    # users get them with zero steps (-NoOmniroute / empty env skips).
+    [string]$OmniroutePluginUrl = $(if ($env:OMNIROUTE_PLUGIN_URL) { $env:OMNIROUTE_PLUGIN_URL } else { "https://github.com/jinnnyang/omniroute-hermes-plugin.git" }),
+    [string]$OmnirouteBaseUrl = $(if ($env:OMNIROUTE_BASE_URL) { $env:OMNIROUTE_BASE_URL } else { "http://localhost:20128/v1" }),
+    [switch]$NoOmniroute,
     # Same opt-out as install.sh --skip-browser: PM records it, so later
     # installs and `hermes update` keep the browser tools off until
     # `hermes pm install agent-browser` opts back in.
@@ -784,6 +789,7 @@ $Stages = @(
     @{ name = "venv"; title = "Create Python environment"; category = "runtime"; needs_user_input = $false },
     @{ name = "python-deps"; title = "Install Python dependencies"; category = "runtime"; needs_user_input = $false },
     @{ name = "config"; title = "Prepare config and skills"; category = "configuration"; needs_user_input = $false },
+    @{ name = "plugins"; title = "Install OmniRoute plugins"; category = "configuration"; needs_user_input = $false },
     # The shared completion tail -- the same call `hermes update` makes -- so
     # the manifest and the run cannot disagree. -IncludeDesktop selects the
     # desktop product inside this stage instead of adding a second build stage.
@@ -1159,6 +1165,60 @@ function Stage-Config {
     Write-Ok "config prepared in $HermesHome"
 }
 
+# OmniRoute provider plugins (model/image/web) ship as a standalone repo and are
+# deployed here (B: install-flow auto-deploy), so fork users get them with zero
+# extra steps. Defaults ON; -NoOmniroute / empty OmniroutePluginUrl skips.
+function Stage-Plugins {
+    if ($NoOmniroute -or [string]::IsNullOrWhiteSpace($OmniroutePluginUrl)) {
+        Log "omniroute plugins skipped (OmniroutePluginUrl empty / -NoOmniroute)"
+        return
+    }
+    if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+        Fail "git is required for omniroute plugins" "git_missing"
+    }
+    $staged = Join-Path $HermesHome (".omniroute-clone-" + [Guid]::NewGuid().ToString("N"))
+    try {
+        Log "Cloning OmniRoute plugins"
+        Invoke-Logged "Cloning OmniRoute plugins" -MayFail { git clone --depth 1 $OmniroutePluginUrl $staged }
+        if ($LASTEXITCODE) {
+            Write-Warn "omniroute plugins clone failed; continuing without them"
+            return
+        }
+        $srcPlugins = Join-Path $staged "plugins"
+        if (-not (Test-Path $srcPlugins)) {
+            Write-Warn "omniroute plugin repo has no plugins/ directory; skipping"
+            return
+        }
+        $pluginDir = Join-Path $HermesHome "plugins"
+        New-Item -ItemType Directory -Force -Path $pluginDir | Out-Null
+        Copy-Item -Path (Join-Path $srcPlugins "*") -Destination $pluginDir -Recurse -Force
+        # Keyless gateway: placeholder key + base URL (only when unset).
+        $envFile = Join-Path $HermesHome ".env"
+        if (-not (Test-Path $envFile)) { New-Item -ItemType File -Path $envFile | Out-Null }
+        $envText = Get-Content $envFile -Raw -ErrorAction SilentlyContinue
+        if ([string]::IsNullOrEmpty($envText) -or $envText -notmatch "(?m)^OMNIROUTE_BASE_URL=") {
+            Add-Content -Path $envFile -Value "OMNIROUTE_BASE_URL=$OmnirouteBaseUrl`nOMNIROUTE_API_KEY=local"
+        }
+        # config.yaml: append each block only when its top-level key is absent.
+        $configFile = Join-Path $HermesHome "config.yaml"
+        if (Test-Path $configFile) {
+            $configText = Get-Content $configFile -Raw
+            if ([string]::IsNullOrEmpty($configText) -or $configText -notmatch "(?m)^custom_providers:") {
+                Add-Content -Path $configFile -Value "`ncustom_providers:`n  omniroute:`n    base_url: $OmnirouteBaseUrl`n    api_mode: chat_completions"
+            }
+            if ([string]::IsNullOrEmpty($configText) -or $configText -notmatch "(?m)^web:") {
+                Add-Content -Path $configFile -Value "`nweb:`n  search_backend: omniroute"
+            }
+            if ([string]::IsNullOrEmpty($configText) -or $configText -notmatch "(?m)^image_gen:") {
+                Add-Content -Path $configFile -Value "`nimage_gen:`n  provider: omniroute`n  model: doubao-seedream-5.0-pro"
+            }
+        }
+        Log "omniroute plugins installed from $OmniroutePluginUrl"
+    } finally {
+        Remove-Item $staged -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
 function Invoke-InstalledHermes([string[]]$CommandArgs) {
     # Load the helper from its text, not its path. Under `irm | iex` this
     # installer runs as a string that execution policy never checks, but
@@ -1326,6 +1386,7 @@ function Invoke-StageByName([string]$name) {
         "python-deps" { Stage-PythonDeps }
         "products" { Stage-Products }
         "config" { Stage-Config }
+        "plugins" { Stage-Plugins }
         "setup" { Stage-Setup }
         "gateway" { Stage-Gateway }
         "desktop" { Stage-Desktop }

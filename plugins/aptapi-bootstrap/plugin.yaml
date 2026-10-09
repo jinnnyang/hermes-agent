@@ -1,0 +1,6 @@
+id: aptapi-bootstrap
+name: AptAPI Plugin Bootstrap
+kind: utility
+version: 0.1.0
+description: "First-launch installer for OmniRoute plugins. Clones jinnnyang/omniroute-hermes-plugin (aptapi branch) into the profile plugins dir on first run. Subsequent updates are handled by the plugins' own self-update mechanism."
+author: jinnnyang

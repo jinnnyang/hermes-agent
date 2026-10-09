@@ -30,6 +30,8 @@ WANT_MANIFEST=false
 JSON=false
 NON_INTERACTIVE=false
 INCLUDE_DESKTOP=false
+OMNIROUTE_PLUGIN_URL="${OMNIROUTE_PLUGIN_URL:-https://github.com/jinnnyang/omniroute-hermes-plugin.git}"
+OMNIROUTE_BASE_URL="${OMNIROUTE_BASE_URL:-http://localhost:20128/v1}"
 VERBOSE=false
 SKIP_BROWSER=false
 SKIP_COMPUTER_USE=false
@@ -63,14 +65,17 @@ while [ $# -gt 0 ]; do
         --skip-browser|--no-playwright|-SkipBrowser) SKIP_BROWSER=true; shift ;;
         --skip-computer-use|-SkipComputerUse) SKIP_COMPUTER_USE=true; shift ;;
         --include-desktop|-IncludeDesktop) INCLUDE_DESKTOP=true; shift ;;
+        --no-omniroute|-NoOmniroute) OMNIROUTE_PLUGIN_URL=""; shift ;;
         --verbose|-Verbose) VERBOSE=true; shift ;;
         -h|--help)
             echo "Usage: install.sh [--branch NAME] [--commit SHA] [--dir PATH]"
             echo "                  [--hermes-home PATH]"
             echo "                  [--manifest] [--stage NAME] [--json]"
             echo "                  [--non-interactive] [--include-desktop] [--verbose]"
-            echo "                  [--skip-browser] [--skip-computer-use]"
+            echo "                  [--skip-browser] [--skip-computer-use] [--no-omniroute]"
             echo
+            echo "  --no-omniroute  Do not install the OmniRoute provider plugins (model/image/web)."
+            echo "                  Default: install them from OMNIROUTE_PLUGIN_URL."
             echo "  --skip-browser  Do not install the browser tools (agent-browser + Chromium)."
             echo "                  Alias: --no-playwright. Remembered by later"
             echo "                  installs and 'hermes update'; undo with 'hermes pm install agent-browser'."
@@ -457,7 +462,7 @@ stage_result() {
 # is never listed: --include-desktop selects the desktop product inside
 # `products` instead of adding a second build stage.
 stage_names() {
-    printf '%s\n' prerequisites repository venv python-deps config products setup gateway complete
+    printf '%s\n' prerequisites repository venv python-deps config plugins products setup gateway complete
 }
 
 # "title|category|needs_user_input".
@@ -477,6 +482,7 @@ stage_record() {
         venv)          echo "Create Python environment|runtime|false" ;;
         python-deps)   echo "Install Python dependencies|runtime|false" ;;
         config)        echo "Prepare config and skills|configuration|false" ;;
+        plugins)       echo "Install OmniRoute plugins|configuration|false" ;;
         products)      products_record ;;
         setup)         echo "Configure API keys and settings|configuration|true" ;;
         gateway)       echo "Configure gateway service|configuration|true" ;;
@@ -874,6 +880,47 @@ stage_config() {
     log_success "config prepared in $HERMES_HOME"
 }
 
+# OmniRoute provider plugins (model/image/web) ship as a standalone repo and are
+# deployed here (B: install-flow auto-deploy), so fork users get them with zero
+# extra steps. Defaults ON; --no-omniroute / empty OMNIROUTE_PLUGIN_URL skips.
+stage_plugins() {
+    if [ -z "$OMNIROUTE_PLUGIN_URL" ]; then
+        log "omniroute plugins skipped (OMNIROUTE_PLUGIN_URL empty / --no-omniroute)"
+        return 0
+    fi
+    command -v git >/dev/null 2>&1 || fail "git is required for omniroute plugins" git_missing
+    local staged
+    staged="$(mktemp -d "$HERMES_HOME/.omniroute-clone-XXXXXX")" || fail "cannot stage omniroute clone" filesystem_error
+    trap 'rm -rf "$staged"' RETURN
+    if ! run_logged "Cloning OmniRoute plugins" git clone --depth 1 "$OMNIROUTE_PLUGIN_URL" "$staged"; then
+        log_warn "omniroute plugins clone failed; continuing without them"
+        return 0
+    fi
+    if [ ! -d "$staged/plugins" ]; then
+        log_warn "omniroute plugin repo has no plugins/ directory; skipping"
+        return 0
+    fi
+    mkdir -p "$HERMES_HOME/plugins"
+    cp -r "$staged/plugins/." "$HERMES_HOME/plugins/"
+    # Keyless gateway: placeholder key + base URL (only when unset).
+    if [ ! -f "$HERMES_HOME/.env" ]; then
+        touch "$HERMES_HOME/.env"
+    fi
+    if ! grep -q "^OMNIROUTE_BASE_URL=" "$HERMES_HOME/.env" 2>/dev/null; then
+        printf 'OMNIROUTE_BASE_URL=%s\nOMNIROUTE_API_KEY=local\n' "$OMNIROUTE_BASE_URL" >> "$HERMES_HOME/.env"
+    fi
+    # config.yaml: append each block only when its top-level key is absent.
+    if [ -f "$HERMES_HOME/config.yaml" ]; then
+        grep -q "^custom_providers:" "$HERMES_HOME/config.yaml" \
+            || printf 'custom_providers:\n  omniroute:\n    base_url: %s\n    api_mode: chat_completions\n' "$OMNIROUTE_BASE_URL" >> "$HERMES_HOME/config.yaml"
+        grep -q "^web:" "$HERMES_HOME/config.yaml" \
+            || printf 'web:\n  search_backend: omniroute\n' >> "$HERMES_HOME/config.yaml"
+        grep -q "^image_gen:" "$HERMES_HOME/config.yaml" \
+            || printf 'image_gen:\n  provider: omniroute\n  model: doubao-seedream-5.0-pro\n' >> "$HERMES_HOME/config.yaml"
+    fi
+    log_success "omniroute plugins installed from $OMNIROUTE_PLUGIN_URL"
+}
+
 # Interactive stages read the terminal, not stdin: under `curl | bash` stdin
 # IS the script. Probe by opening /dev/tty -- a Docker build has the device
 # node in its mount namespace but opening it fails (ENXIO).
@@ -952,6 +999,7 @@ run_stage() (
         venv) stage_venv ;;
         python-deps) stage_python_deps ;;
         config) stage_config ;;
+        plugins) stage_plugins ;;
         products) stage_products ;;
         setup) stage_setup ;;
         gateway) stage_gateway ;;
