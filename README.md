@@ -32,6 +32,55 @@ Use any model you want — [Nous Portal](https://portal.nousresearch.com), OpenR
 
 ---
 
+## jinnnyang Fork — `moirai` release branch
+
+This is **jinnnyang/hermes-agent**'s `moirai` release branch — a customized
+build of Hermes Agent tracking upstream NousResearch/hermes-agent, with:
+
+- **OmniRoute model provider** bundled by default (gateway default
+  `https://aptapi.dev/v1`; override with `OMNIROUTE_BASE_URL`, skip with
+  `-NoOmniroute` on the PowerShell installer / `OMNIROUTE_PLUGIN_URL=` on shell).
+- **Updates follow your current branch**: `hermes update` tracks the checked-out
+  branch by default (`updates.track_current_branch`, default on) — on `moirai`
+  it checks `origin/moirai` of this fork, not upstream.
+
+### Install from this branch
+
+**Windows (PowerShell)** — download this branch's installer, then run it against
+this fork and the `moirai` branch:
+
+```powershell
+$env:HERMES_REPO_URL = "https://github.com/jinnnyang/hermes-agent.git"
+iwr "https://cdn.jsdelivr.net/gh/jinnnyang/hermes-agent@moirai/scripts/install.ps1" -OutFile install.ps1
+.\install.ps1 -Branch moirai
+```
+
+`cdn.jsdelivr.net` is the fastest route in CN; direct GitHub also works:
+`https://raw.githubusercontent.com/jinnnyang/hermes-agent/moirai/scripts/install.ps1`.
+
+**Linux / macOS / WSL2**:
+
+```bash
+curl -fsSL https://cdn.jsdelivr.net/gh/jinnnyang/hermes-agent@moirai/scripts/install.sh -o install.sh
+HERMES_REPO_URL="https://github.com/jinnnyang/hermes-agent.git" bash install.sh --branch moirai
+```
+
+The installer points `origin` at `HERMES_REPO_URL` and checks out `moirai`;
+afterwards `hermes update` (no arguments) stays on `moirai` and picks up new
+pushes to `origin/moirai` automatically.
+
+**Already on the official build?** One explicit hop switches tracks:
+
+```bash
+hermes update --branch moirai
+```
+
+> **Network notes:** if GitHub or jsDelivr is unreachable, set
+> `HTTP_PROXY`/`HTTPS_PROXY` (e.g. Clash `http://127.0.0.1:7897`) in the same
+> shell before the commands above; the installer's `git clone` needs them too.
+
+---
+
 ## Quick Install
 
 ### Linux, macOS, WSL2
