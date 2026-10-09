@@ -612,6 +612,25 @@ def _run_logged_subprocess(cmd, *, cwd=None, env=None):
         proc.stdout.close()
 
 
+def _track_current_branch() -> str | None:
+    """The branch ``hermes update`` tracks when ``updates.track_current_branch`` is on.
+
+    Follows whatever branch the git checkout is on (main, feature forks, custom
+    branches); returns ``None`` when the option is off, the checkout is detached
+    (no current branch), or the config read fails — callers then fall back to the
+    standard channel resolution. Non-git installs never reach this path.
+    """
+    try:
+        enabled = _updates_config().get("track_current_branch", True)
+    except Exception:
+        return None
+    if not enabled:
+        return None
+    git_cmd = _base_git_cmd()
+    cur = _git_run(git_cmd, ["branch", "--show-current"]).stdout.strip()
+    return cur or None
+
+
 def _source_update_channel(args=None, *, channel=None, branch_explicit=False) -> str:
     """Explicit branches win; otherwise transient channel, then this install's record."""
     if branch_explicit or getattr(args, "branch", None):
@@ -665,11 +684,17 @@ def _cmd_update_check(branch: str = "main", *, branch_explicit: bool = False, ch
     _map_ssl_cert_file_for_git(git_cmd)
     _check.clear_git_debris(root)
 
-    selected_channel = _source_update_channel(channel=channel, branch_explicit=branch_explicit)
-    if not branch_explicit:
-        branch = _check.channel_compare_branch(selected_channel, git_cmd, root)
-        if branch is None:
-            return
+    tracked_branch = None
+    if not branch_explicit and channel is None:
+        tracked_branch = _track_current_branch()
+    if tracked_branch is not None:
+        branch = tracked_branch
+    else:
+        selected_channel = _source_update_channel(channel=channel, branch_explicit=branch_explicit)
+        if not branch_explicit:
+            branch = _check.channel_compare_branch(selected_channel, git_cmd, root)
+            if branch is None:
+                return
 
     # Installer checkouts are shallow (`git clone --depth 1`). A plain fetch would unshallow
     # the repo (the exact cost the shallow clone avoided) and rev-list would then report a
@@ -677,6 +702,7 @@ def _cmd_update_check(branch: str = "main", *, branch_explicit: bool = False, ch
     is_shallow = _check.is_shallow_repository(git_cmd, root)
     fetch_result, compare_branch = _check.fetch_compare_branch(
         git_cmd, root, branch, ["--depth", "1"] if is_shallow else [],
+        prefer_upstream=tracked_branch is None,
     )
     if fetch_result.returncode != 0:
         _print_fetch_failure(fetch_result.stderr)
@@ -1835,12 +1861,17 @@ def _cmd_update_impl(args, gateway_mode: bool):
         opts, _pre_update_plan, pre_update_snapshot_id, _windows_gateway_resume,
         had_desktop_app_before_update, gateway_mode)
     branch = _m()._resolve_update_branch(args)
+    tracked_branch = None
+    if not getattr(args, "branch", None) and not getattr(args, "channel", None):
+        tracked_branch = _track_current_branch()
+    if tracked_branch is not None:
+        branch = tracked_branch
     completion_request["branch"] = branch
     target_ref = f"origin/{branch}"
     release_sha = None
     target_repository = None
     selected_channel = _source_update_channel(args)
-    if not getattr(args, "branch", None):
+    if not getattr(args, "branch", None) and tracked_branch is None:
         from hermes_cli.release_channels import retrying_reads
         from hermes_cli.source_releases import resolve_source_target
 
