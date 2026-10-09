@@ -46,9 +46,16 @@ build of Hermes Agent tracking upstream NousResearch/hermes-agent, with:
 
 ### Install from this branch
 
-**Windows (PowerShell)** — download this branch's installer, then run it against
-this fork and the `moirai` branch. Prefer `curl.exe` (built into Windows 10+;
-`iwr`/`Invoke-WebRequest` fails on some networks/TLS stacks):
+**Windows (PowerShell)** — run the installer in-memory in one line (verified
+working; `irm` is `Invoke-RestMethod` — unlike `iwr`, it works on restricted
+networks, and `-UseBasicParsing` avoids the PS 5.1 IE-engine TLS failures):
+
+```powershell
+$env:HERMES_REPO_URL="https://github.com/jinnnyang/hermes-agent.git"; $s = irm "https://cdn.jsdelivr.net/gh/jinnnyang/hermes-agent@moirai/scripts/install.ps1" -UseBasicParsing; iex "& {$s} -Branch moirai"
+```
+
+Alternative — download the script to a file, then run it (`curl.exe` is built
+into Windows 10+; `iwr` fails on some networks/TLS stacks):
 
 ```powershell
 $env:HERMES_REPO_URL = "https://github.com/jinnnyang/hermes-agent.git"
