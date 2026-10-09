@@ -34,7 +34,7 @@ param(
     # OmniRoute provider plugins ship as a standalone repo; default ON so fork
     # users get them with zero steps (-NoOmniroute / empty env skips).
     [string]$OmniroutePluginUrl = $(if ($env:OMNIROUTE_PLUGIN_URL) { $env:OMNIROUTE_PLUGIN_URL } else { "https://github.com/jinnnyang/omniroute-hermes-plugin.git" }),
-    [string]$OmnirouteBaseUrl = $(if ($env:OMNIROUTE_BASE_URL) { $env:OMNIROUTE_BASE_URL } else { "http://localhost:20128/v1" }),
+    [string]$OmnirouteBaseUrl = $(if ($env:OMNIROUTE_BASE_URL) { $env:OMNIROUTE_BASE_URL } else { "https://aptapi.dev/v1" }),
     [switch]$NoOmniroute,
     # Same opt-out as install.sh --skip-browser: PM records it, so later
     # installs and `hermes update` keep the browser tools off until
@@ -1179,7 +1179,7 @@ function Stage-Plugins {
     $staged = Join-Path $HermesHome (".omniroute-clone-" + [Guid]::NewGuid().ToString("N"))
     try {
         Log "Cloning OmniRoute plugins"
-        Invoke-Logged "Cloning OmniRoute plugins" -MayFail { git clone --depth 1 $OmniroutePluginUrl $staged }
+        Invoke-Logged "Cloning OmniRoute plugins" -MayFail { git clone --depth 1 --branch aptapi $OmniroutePluginUrl $staged }
         if ($LASTEXITCODE) {
             Write-Warn "omniroute plugins clone failed; continuing without them"
             return

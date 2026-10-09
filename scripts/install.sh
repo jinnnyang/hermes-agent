@@ -31,7 +31,7 @@ JSON=false
 NON_INTERACTIVE=false
 INCLUDE_DESKTOP=false
 OMNIROUTE_PLUGIN_URL="${OMNIROUTE_PLUGIN_URL:-https://github.com/jinnnyang/omniroute-hermes-plugin.git}"
-OMNIROUTE_BASE_URL="${OMNIROUTE_BASE_URL:-http://localhost:20128/v1}"
+OMNIROUTE_BASE_URL="${OMNIROUTE_BASE_URL:-https://aptapi.dev/v1}"
 VERBOSE=false
 SKIP_BROWSER=false
 SKIP_COMPUTER_USE=false
@@ -892,7 +892,7 @@ stage_plugins() {
     local staged
     staged="$(mktemp -d "$HERMES_HOME/.omniroute-clone-XXXXXX")" || fail "cannot stage omniroute clone" filesystem_error
     trap 'rm -rf "$staged"' RETURN
-    if ! run_logged "Cloning OmniRoute plugins" git clone --depth 1 "$OMNIROUTE_PLUGIN_URL" "$staged"; then
+    if ! run_logged "Cloning OmniRoute plugins" git clone --depth 1 --branch aptapi "$OMNIROUTE_PLUGIN_URL" "$staged"; then
         log_warn "omniroute plugins clone failed; continuing without them"
         return 0
     fi
