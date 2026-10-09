@@ -48,10 +48,12 @@ build of Hermes Agent tracking upstream NousResearch/hermes-agent, with:
 
 **Windows (PowerShell)** — run the installer in-memory in one line (verified
 working; `irm` is `Invoke-RestMethod` — unlike `iwr`, it works on restricted
-networks, and `-UseBasicParsing` avoids the PS 5.1 IE-engine TLS failures):
+networks, and `-UseBasicParsing` avoids the PS 5.1 IE-engine TLS failures).
+Prefix `chcp 65001` to switch the console to UTF-8 (otherwise `✓` from the
+dependency installer shows as `鉁?` mojibake on Windows PowerShell 5.1):
 
 ```powershell
-$env:HERMES_REPO_URL="https://github.com/jinnnyang/hermes-agent.git"; $s = irm "https://cdn.jsdelivr.net/gh/jinnnyang/hermes-agent@moirai/scripts/install.ps1" -UseBasicParsing; iex "& {$s} -Branch moirai"
+chcp 65001; $env:HERMES_REPO_URL="https://github.com/jinnnyang/hermes-agent.git"; $s = irm "https://cdn.jsdelivr.net/gh/jinnnyang/hermes-agent@moirai/scripts/install.ps1" -UseBasicParsing; iex "& {$s} -Branch moirai"
 ```
 
 Alternative — download the script to a file, then run it (`curl.exe` is built
