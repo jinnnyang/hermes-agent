@@ -758,7 +758,11 @@ function Get-NativeDetail {
 # value can call this. The block resolves its variables through this
 # function's scope, so locals here avoid the names call sites use.
 function Invoke-Logged {
-    param([string]$StatusLabel, [scriptblock]$NativeBlock, [switch]$MayFail)
+    # -Utf8Output: the block runs a UTF-8 producer (uv, the bootstrap Python's
+    # pm.cli / source completion / launcher stages). Windows PowerShell 5.1
+    # decodes captured native stdout with the console code page (CP936/CP437),
+    # which turns the child's UTF-8 arrows and checkmarks into mojibake.
+    param([string]$StatusLabel, [scriptblock]$NativeBlock, [switch]$MayFail, [switch]$Utf8Output)
     $script:NativeError = $null
     $logWriter = $null
     if (Test-QuietOutput) {
@@ -777,7 +781,7 @@ function Invoke-Logged {
         # failure reason can name the cause.
         # Named -TypeName: a positional New-Object binds to callers' New-Object shims.
         $outputLines = New-Object -TypeName 'System.Collections.Generic.Queue[string]'
-        Invoke-Native { & $NativeBlock 2>&1 } | ForEach-Object {
+        Invoke-Native { & $NativeBlock 2>&1 } -Utf8Output:$Utf8Output | ForEach-Object {
             $outputLines.Enqueue("$_")
             if ($outputLines.Count -gt 20) { [void]$outputLines.Dequeue() }
             if ($_ -is [System.Management.Automation.ErrorRecord]) { [Console]::Error.WriteLine("$_") }
@@ -794,7 +798,7 @@ function Invoke-Logged {
     try {
         $logWriter.WriteLine("==> $StatusLabel ($((Get-Date).ToUniversalTime().ToString('s'))Z)")
         Write-StatusLine $StatusLabel $columns
-        Invoke-Native { & $NativeBlock 2>&1 } | ForEach-Object {
+        Invoke-Native { & $NativeBlock 2>&1 } -Utf8Output:$Utf8Output | ForEach-Object {
             $outputLine = "$_".TrimEnd("`r")
             $logWriter.WriteLine($outputLine)
             $recentLines.Enqueue($outputLine)
@@ -1328,7 +1332,7 @@ function Get-BootstrapPython {
     $pyRequest = "cpython-$pyVersion-windows-$pyArch-none"
     $bootPy = (Invoke-Native -Utf8Output { & $uv python find --managed-python --no-project $pyRequest 2>$null }) -join "`n"
     if ($LASTEXITCODE -or -not $bootPy) {
-        Invoke-Logged "Downloading Python $pyVersion" { & $uv python install --no-bin --no-registry $pyRequest }
+        Invoke-Logged "Downloading Python $pyVersion" -Utf8Output { & $uv python install --no-bin --no-registry $pyRequest }
         if ($LASTEXITCODE) { Fail "bootstrap Python installation failed" python_install_failed }
         $bootPy = (Invoke-Native -Utf8Output { & $uv python find --managed-python --no-project $pyRequest }) -join "`n"
     }
@@ -1349,7 +1353,7 @@ function Invoke-BootstrapPm {
         # default rejects 'chromium', and newer PMs read 'agent-browser' as 'chromium'.
         if ($SkipBrowser) { $pmArgs += @('--without', 'agent-browser') }
         if ($SkipComputerUse) { $pmArgs += @('--without', 'cua-driver') }
-        Invoke-Logged "Installing dependencies (hash-verified via uv.lock)" { & $bootPy -m pm.cli @pmArgs }
+        Invoke-Logged "Installing dependencies (hash-verified via uv.lock)" -Utf8Output { & $bootPy -X utf8 -m pm.cli @pmArgs }
         if ($LASTEXITCODE) { Fail "dependency install failed" deps_install_failed }
     } finally {
         Pop-Location
@@ -1373,7 +1377,7 @@ function Invoke-SourceCompletion([bool]$Desktop) {
     if ($Desktop) { $completionArgs += '--desktop' }
     Push-Location $InstallDir
     try {
-        Invoke-Logged "Building the hermes command and apps" { & $bootPy @completionArgs }
+        Invoke-Logged "Building the hermes command and apps" -Utf8Output { & $bootPy @completionArgs }
         $code = $LASTEXITCODE
     } finally {
         Pop-Location
@@ -1390,7 +1394,7 @@ function Publish-UserCommand {
     $bootPy = Get-BootstrapPython
     Push-Location $InstallDir
     try {
-        Invoke-Logged "Publishing the hermes command" { & $bootPy -I -X utf8 hermes_cli/_launchers.py $binDir }
+        Invoke-Logged "Publishing the hermes command" -Utf8Output { & $bootPy -I -X utf8 hermes_cli/_launchers.py $binDir }
         $code = $LASTEXITCODE
     } finally {
         Pop-Location
