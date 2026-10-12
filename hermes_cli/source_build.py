@@ -6,6 +6,13 @@ import shutil
 import subprocess
 import sys
 
+# Status glyphs: ASCII on Windows, where CP936 consoles/pipes decode the UTF-8
+# arrows and checkmarks as mojibake; the installer's own lines use ASCII too.
+if sys.platform == "win32":
+    _OK, _WARN = "OK", "WARN"
+else:
+    _OK, _WARN = "✓", "⚠"
+
 
 def source_product_current(project_root: Path, product: str, out: Path) -> bool:
     """Read the compiler's receipt without acquiring tools or dependencies."""
@@ -145,7 +152,7 @@ def build_update_products(project_root: Path, *, desktop: bool) -> None:
             step()
             return True
         except Exception as exc:  # health: allow BLE001 -- collected and raised after the independent steps
-            print(f"  ⚠ {name} failed: {_failure_text(exc)}")
+            print(f"  {_WARN} {name} failed: {_failure_text(exc)}")
             failures.append((name, exc))
             return False
 
@@ -173,13 +180,13 @@ def build_update_products(project_root: Path, *, desktop: bool) -> None:
             # a retried tail, a takeover re-entry.
             if "ui-tui" in frontends:
                 if source_product_current(project_root, "tui", project_root / "ui-tui/dist"):
-                    print("  ✓ TUI is up to date")
+                    print(f"  {_OK} TUI is up to date")
                 else:
                     publish_stage("Building the TUI")
                     attempt("TUI build", lambda: build_source_tui(project_root, env=env))
             if "web" in frontends:
                 if source_product_current(project_root, "web", project_root / "hermes_cli/web_dist"):
-                    print("  ✓ Web UI is up to date")
+                    print(f"  {_OK} Web UI is up to date")
                 else:
                     publish_stage("Building the web UI")
                     attempt("web UI build", lambda: build_source_web(project_root, env=env))
@@ -197,7 +204,7 @@ def build_update_products(project_root: Path, *, desktop: bool) -> None:
 
         migrate_all_homes()
     except Exception as exc:  # health: allow BLE001 -- post-commit boundary: printed as ⚠, never fails the committed update; every later update/tail re-runs it
-        print(f"  ⚠ Memory provider migration skipped: {exc}")
+        print(f"  {_WARN} Memory provider migration skipped: {exc}")
     # Same for a gateway platform / toolset that left core (Home Assistant): every home that used
     # it gets its catalog plugin (hermes_cli/left_core_migration.py).
     try:
@@ -205,7 +212,7 @@ def build_update_products(project_root: Path, *, desktop: bool) -> None:
 
         migrate_left_core()
     except Exception as exc:  # health: allow BLE001 -- post-commit boundary: printed as ⚠, never fails the committed update; every later update/tail re-runs it
-        print(f"  ⚠ Plugin migration skipped: {exc}")
+        print(f"  {_WARN} Plugin migration skipped: {exc}")
     if failures:
         raise ProductBuildError(failures)
 
@@ -216,7 +223,7 @@ def _build_desktop_product(project_root: Path, env: dict, publish_stage) -> None
 
     desktop_dir = project_root / "apps/desktop"
     if _packaged_desktop_current_for_head(desktop_dir, project_root):
-        print("  ✓ Desktop app is up to date")
+        print(f"  {_OK} Desktop app is up to date")
     else:
         publish_stage("Building the desktop app")
         # The desktop build mutates checkout-scoped node_modules and
