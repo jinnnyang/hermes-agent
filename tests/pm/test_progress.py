@@ -20,6 +20,8 @@ def test_ci_streams_and_an_explicit_choice_overrides_it():
 def test_contained_run_shows_output_only_when_the_child_fails(monkeypatch, fails):
     monkeypatch.setenv("HERMES_VERBOSE", "0")
     stream = io.StringIO()
+    # The status glyph is ASCII on Windows (CP936 consoles mojibake the UTF-8 arrow).
+    arrow = "->" if sys.platform == "win32" else "→"
     script = "import sys\nfor i in range(200): print('noise', i)\nprint('the real error')\nsys.exit(%d)" % fails
     command = [sys.executable, "-c", script]
     if fails:
@@ -28,6 +30,6 @@ def test_contained_run_shows_output_only_when_the_child_fails(monkeypatch, fails
     else:
         run_contained(command, "Installing things", stream=stream)
     text = stream.getvalue()
-    assert "→ Installing things" in text
+    assert f"{arrow} Installing things" in text
     assert ("the real error" in text) is fails
     assert "noise 0" not in text, "the failure tail stays bounded"
