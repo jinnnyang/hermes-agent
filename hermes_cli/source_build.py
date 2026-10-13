@@ -6,6 +6,13 @@ import shutil
 import subprocess
 import sys
 
+# Status glyphs: ASCII on Windows, where CP936 consoles/pipes decode the UTF-8
+# arrows and checkmarks as mojibake; the installer's own lines use ASCII too.
+if sys.platform == "win32":
+    _OK, _WARN = "OK", "WARN"
+else:
+    _OK, _WARN = "✓", "⚠"
+
 
 def source_product_current(project_root: Path, product: str, out: Path) -> bool:
     """Read the compiler's receipt without acquiring tools or dependencies."""
@@ -127,6 +134,10 @@ def _failure_text(exc: BaseException) -> str:
     return f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
 
 
+def _headless_linux() -> bool:
+    return sys.platform.startswith("linux") and not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+
+
 def build_update_products(project_root: Path, *, desktop: bool) -> None:
     """Prepare the selected union once, attempting every independent product.
 
@@ -145,7 +156,7 @@ def build_update_products(project_root: Path, *, desktop: bool) -> None:
             step()
             return True
         except Exception as exc:  # health: allow BLE001 -- collected and raised after the independent steps
-            print(f"  ⚠ {name} failed: {_failure_text(exc)}")
+            print(f"  {_WARN} {name} failed: {_failure_text(exc)}")
             failures.append((name, exc))
             return False
 
@@ -157,15 +168,29 @@ def build_update_products(project_root: Path, *, desktop: bool) -> None:
         workspaces = frontends + (("apps/desktop",) if desktop else ())
         publish_stage("Updating Node dependencies")
 
-        def node_dependencies() -> None:
+        def node_dependencies(selected: tuple[str, ...]) -> None:
             # Acquiring npm is part of this step: its failure must be reported like the install's.
             # A recorded install is trusted as at startup (re-hashing node+npm costs ~2 s per
             # tail); a missing one is still installed explicitly.
             env.update(source_build_env(explicit=True, verify=False))
-            prepare_source_dependencies(project_root, workspaces, env=env, explicit=True)
+            prepare_source_dependencies(project_root, selected, env=env, explicit=True)
 
         # Every product compiles from these node_modules: without them there is nothing to build.
-        if attempt("Node dependencies", node_dependencies):
+        prepared = attempt("Node dependencies", lambda: node_dependencies(workspaces))
+        desktop_skipped = False
+        if not prepared and desktop and env:
+            # Only apps/desktop brings native addons (node-pty, electron) into the union: a host
+            # whose compiler cannot build them must still get the TUI and web UI it runs.
+            print("  → Retrying Node dependencies without the desktop app")
+            failed = failures.pop()
+            prepared = desktop_skipped = attempt("Node dependencies", lambda: node_dependencies(frontends))
+            if desktop_skipped:
+                failures.append(("desktop dependencies", failed[1]))
+        desktop_reason = failures[-1][0] if failures else ""
+        if desktop and (desktop_skipped or _headless_linux()):
+            print("  ⓘ If this host never runs the desktop app, `hermes uninstall --gui` removes it "
+                  "and future updates stop building it.")
+        if prepared:
             # An update that changed no TUI/web input reuses the receipted output, as the
             # launch path already does; recompiling it produces the same bytes. Desktop
             # additionally needs the packaged app to name HEAD (its baked stamp carries the
@@ -173,22 +198,23 @@ def build_update_products(project_root: Path, *, desktop: bool) -> None:
             # a retried tail, a takeover re-entry.
             if "ui-tui" in frontends:
                 if source_product_current(project_root, "tui", project_root / "ui-tui/dist"):
-                    print("  ✓ TUI is up to date")
+                    print(f"  {_OK} TUI is up to date")
                 else:
                     publish_stage("Building the TUI")
                     attempt("TUI build", lambda: build_source_tui(project_root, env=env))
             if "web" in frontends:
                 if source_product_current(project_root, "web", project_root / "hermes_cli/web_dist"):
-                    print("  ✓ Web UI is up to date")
+                    print(f"  {_OK} Web UI is up to date")
                 else:
                     publish_stage("Building the web UI")
                     attempt("web UI build", lambda: build_source_web(project_root, env=env))
-            if desktop:
+            if desktop and not desktop_skipped:
                 desktop_built = attempt("desktop app build", lambda: _build_desktop_product(project_root, env, publish_stage))
+                desktop_reason = failures[-1][0] if not desktop_built else ""
         if desktop and not desktop_built:
             # One whole line the Desktop hand-off scripts match: the follow-up text is truncated
             # and names whichever products failed first, so it cannot say if THIS app was rebuilt.
-            print(f"  Desktop app build owed: {failures[-1][0]} failed")
+            print(f"  Desktop app build owed: {desktop_reason} failed")
     # A configured memory provider that no longer ships in core is installed from the
     # catalog for every profile home sharing this venv (config, data and tool names
     # unchanged). The update must finish even if the migration blows up.
@@ -197,7 +223,7 @@ def build_update_products(project_root: Path, *, desktop: bool) -> None:
 
         migrate_all_homes()
     except Exception as exc:  # health: allow BLE001 -- post-commit boundary: printed as ⚠, never fails the committed update; every later update/tail re-runs it
-        print(f"  ⚠ Memory provider migration skipped: {exc}")
+        print(f"  {_WARN} Memory provider migration skipped: {exc}")
     # Same for a gateway platform / toolset that left core (Home Assistant): every home that used
     # it gets its catalog plugin (hermes_cli/left_core_migration.py).
     try:
@@ -205,7 +231,7 @@ def build_update_products(project_root: Path, *, desktop: bool) -> None:
 
         migrate_left_core()
     except Exception as exc:  # health: allow BLE001 -- post-commit boundary: printed as ⚠, never fails the committed update; every later update/tail re-runs it
-        print(f"  ⚠ Plugin migration skipped: {exc}")
+        print(f"  {_WARN} Plugin migration skipped: {exc}")
     if failures:
         raise ProductBuildError(failures)
 
@@ -216,7 +242,7 @@ def _build_desktop_product(project_root: Path, env: dict, publish_stage) -> None
 
     desktop_dir = project_root / "apps/desktop"
     if _packaged_desktop_current_for_head(desktop_dir, project_root):
-        print("  ✓ Desktop app is up to date")
+        print(f"  {_OK} Desktop app is up to date")
     else:
         publish_stage("Building the desktop app")
         # The desktop build mutates checkout-scoped node_modules and

@@ -31,6 +31,22 @@ _ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
 _REDRAW_INTERVAL = 0.05
 
 
+def _status_glyphs() -> tuple[str, str, str, str]:
+    """Status line glyphs ``(arrow, ellipsis, ok, fail)``: ASCII on Windows.
+
+    Windows consoles and captured pipelines commonly run CP936/CP437, which
+    decode the UTF-8 arrows and checkmarks as mojibake (``→`` renders as
+    ``鈫?``); the installer's own line style already uses ASCII for the same
+    reason. POSIX terminals and UTF-8 consoles render the Unicode forms.
+    """
+    if sys.platform == "win32":
+        return "->", "...", "OK", "FAIL"
+    return "→", "…", "✓", "✗"
+
+
+_ARROW, _ELLIPSIS, _OK, _FAIL = _status_glyphs()
+
+
 class TextSink(Protocol):
     def write(self, text: str, /) -> int: ...
 
@@ -75,9 +91,9 @@ class LiveTail:
         self._last_draw = 0.0
         if label is not None:
             if self.live:
-                self._draw(f"{indent}→ {label}…")
+                self._draw(f"{indent}{_ARROW} {label}{_ELLIPSIS}")
             else:
-                self._emit(f"{indent}→ {label}…\n")
+                self._emit(f"{indent}{_ARROW} {label}{_ELLIPSIS}\n")
 
     def write(self, text: str) -> int:
         # npm and uv redraw with bare CRs; each redraw is a line of progress.
@@ -99,13 +115,13 @@ class LiveTail:
             self._emit("\r")
         if ok:
             if self.label is not None:
-                self._emit(f"{self.indent}✓ {self.label}\n")
+                self._emit(f"{self.indent}{_OK} {self.label}\n")
             return
         name = self.label or "command"
         if not self.tail:
-            self._emit(f"{self.indent}✗ {name} failed\n")
+            self._emit(f"{self.indent}{_FAIL} {name} failed\n")
             return
-        self._emit(f"{self.indent}✗ {name} failed; last {len(self.tail)} lines of output:\n")
+        self._emit(f"{self.indent}{_FAIL} {name} failed; last {len(self.tail)} lines of output:\n")
         self._emit("".join(f"{self.indent}    {line}\n" for line in self.tail))
 
     def _line(self, line: str) -> None:
@@ -119,7 +135,7 @@ class LiveTail:
         if now - self._last_draw < _REDRAW_INTERVAL:
             return
         self._last_draw = now
-        self._draw(f"{self.indent}→ {self.label}… {line.strip()}")
+        self._draw(f"{self.indent}{_ARROW} {self.label}{_ELLIPSIS} {line.strip()}")
 
     def _draw(self, text: str) -> None:
         # Pad instead of an ANSI erase: a bare CR works on every Windows console.
@@ -139,7 +155,7 @@ def run_contained(command: Sequence[str], label: str, *, stream: Optional[IO[str
     """``subprocess.run(check=True)`` under the output policy."""
     if verbose_output():
         out = sys.stdout if stream is None else stream
-        out.write(f"{indent}→ {label}…\n")
+        out.write(f"{indent}{_ARROW} {label}{_ELLIPSIS}\n")
         out.flush()
         return subprocess.run(command, check=True, **kwargs)
     tail = LiveTail(label, stream, hide=hide, indent=indent)
