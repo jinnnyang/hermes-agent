@@ -1,0 +1,45 @@
+<html style="margin:0;padding:0;">
+<title>Hermes 桌面端更新失败诊断</title>
+<div style="width:100%;box-sizing:border-box;font-family:'Segoe UI','Microsoft YaHei',system-ui,sans-serif;background:#f7f8fa;color:#1f2430;padding:24px;line-height:1.5;">
+  <div style="max-width:960px;margin:0 auto;">
+
+    <div style="background:#ffffff;border:1px solid #e3e6ec;border-radius:10px;padding:16px 20px;margin-bottom:16px;">
+      <div style="font-size:20px;font-weight:600;">结论：失败是网络问题，不是 Hermes 自身故障</div>
+      <div style="font-size:14px;color:#444a57;margin-top:6px;">更新源是本地安装目录 git remote 指向的 GitHub fork（<b>jinnnyang/hermes-agent</b>，分支 <b>moirai</b>）。拉取时<em>直连 github.com:443 被重置/超时</em>，走本机 Clash 代理（127.0.0.1:7897）1.3 秒即成功。</div>
+    </div>
+
+    <div style="background:#ffffff;border:1px solid #e3e6ec;border-radius:10px;padding:16px 20px;margin-bottom:16px;">
+      <div style="font-size:15px;font-weight:600;margin-bottom:10px;">更新链路（日志 17:57:58 → 18:01:56）</div>
+      <div style="display:flex;flex-wrap:wrap;align-items:stretch;gap:6px;font-size:13px;">
+        <div style="flex:1 1 130px;min-width:120px;background:#eef4ff;border:1px solid #c6d8f7;border-radius:8px;padding:8px 10px;"><b>① Desktop 更新按钮</b><br/><span style="color:#555c6b;">pid 10884 发起，写更新 marker</span></div>
+        <div style="align-self:center;color:#8a93a5;">→</div>
+        <div style="flex:1 1 150px;min-width:140px;background:#eef4ff;border:1px solid #c6d8f7;border-radius:8px;padding:8px 10px;"><b>② hand-off 脚本</b><br/><span style="color:#555c6b;">scripts/desktop-update/windows.ps1 接管，退出桌面</span></div>
+        <div style="align-self:center;color:#8a93a5;">→</div>
+        <div style="flex:1 1 170px;min-width:160px;background:#eef4ff;border:1px solid #c6d8f7;border-radius:8px;padding:8px 10px;"><b>③ CLI 更新</b><br/><span style="color:#555c6b;">hermes update --yes --gateway --branch moirai --keep-stash</span></div>
+        <div style="align-self:center;color:#8a93a5;">→</div>
+        <div style="flex:1 1 130px;min-width:120px;background:#fdecec;border:1px solid #f3b6b6;border-radius:8px;padding:8px 10px;"><b>④ git fetch ✗</b><br/><span style="color:#b3261e;">直连 GitHub 失败（断点）</span></div>
+        <div style="align-self:center;color:#8a93a5;">→</div>
+        <div style="flex:1 1 120px;min-width:110px;background:#eef4ff;border:1px solid #c6d8f7;border-radius:8px;padding:8px 10px;"><b>⑤ 回滚重启</b><br/><span style="color:#555c6b;">移除 marker，原样重启 Desktop（未改动）</span></div>
+      </div>
+      <div style="font-size:13px;color:#444a57;margin-top:10px;">更新源：<code style="background:#f0f1f4;padding:1px 6px;border-radius:4px;">origin = https://github.com/jinnnyang/hermes-agent.git</code>（fork，非上游 NousResearch 仓库；blob:none 稀疏拉取）</div>
+    </div>
+
+    <div style="display:flex;flex-wrap:wrap;gap:16px;margin-bottom:16px;">
+      <div style="flex:1 1 300px;background:#ffffff;border:1px solid #e3e6ec;border-radius:10px;padding:16px 20px;">
+        <div style="font-size:15px;font-weight:600;margin-bottom:8px;">直连 github.com（复现当时失败）</div>
+        <div style="font-size:13px;color:#b3261e;background:#fdf3f3;border:1px solid #f3c4c4;border-radius:6px;padding:8px 10px;">fatal: unable to access …<br/>Recv failure: Connection was reset<br/>（本次实测：21.8s 超时 exit=128）</div>
+      </div>
+      <div style="flex:1 1 300px;background:#ffffff;border:1px solid #e3e6ec;border-radius:10px;padding:16px 20px;">
+        <div style="font-size:15px;font-weight:600;margin-bottom:8px;">走 Clash 代理 127.0.0.1:7897（实测）</div>
+        <div style="font-size:13px;color:#1c6b2f;background:#f1faf3;border:1px solid #b8e0c2;border-radius:6px;padding:8px 10px;">git -c http.proxy=http://127.0.0.1:7897 ls-remote …<br/>56a6d209… HEAD · 1.3s exit=0 ✓</div>
+      </div>
+    </div>
+
+    <div style="background:#ffffff;border:1px solid #e3e6ec;border-radius:10px;padding:16px 20px;">
+      <div style="font-size:15px;font-weight:600;margin-bottom:6px;">为什么“检查更新”也失败</div>
+      <div style="font-size:14px;color:#444a57;">本套更新机制没有独立版本服务：检查更新 = git fetch 远端（有新提交则快进合并）。fetch 不通，检查与更新同时失败。本机 git 全局代理已按你的配置移除（gitconfig 无 http proxy），因此直连被网络环境重置。</div>
+    </div>
+
+  </div>
+</div>
+</html>
