@@ -146,14 +146,78 @@ def _fetch(git_cmd: list[str], root: Path, depth_args: list[str], remote: str, b
         **_uc()._no_prompt_git_kwargs())
 
 
-def fetch_compare_branch(git_cmd: list[str], root: Path, branch: str, depth_args: list[str]):
+def resolve_tracked_branch(args, fallback: str, git_cmd) -> tuple[str | None, str]:
+    """``(tracked, effective)``: the checkout's own branch when tracking is on, else ``fallback``.
+
+    The choice lives here so ``update_cmd``'s apply path adds no branch of its own
+    (``_cmd_update_impl`` sits at the repo's complexity cap).
+    """
+    tracked = track_current_branch(git_cmd, args)
+    return tracked, tracked if tracked is not None else fallback
+
+
+def resolve_check_branch(git_cmd, root: Path, *, channel=None, branch_explicit=False,
+                         default_branch: str = "main") -> tuple[str | None, bool]:
+    """``(branch, from_tracking)`` — the branch ``--check`` compares against.
+
+    The checkout's own branch when tracking is on (``updates.track_current_branch``),
+    else the channel's compare branch. ``branch is None`` means the channel names
+    nothing to compare against (the caller reports that).
+    """
+    tracked = track_current_branch(git_cmd, channel=channel, branch_explicit=branch_explicit)
+    if tracked is not None:
+        return tracked, True
+    selected = _uc()._source_update_channel(channel=channel, branch_explicit=branch_explicit)
+    if branch_explicit:
+        return default_branch, False
+    return channel_compare_branch(selected, git_cmd, root), False
+
+
+def track_current_branch(git_cmd, args=None, *, channel=None, branch_explicit=False) -> str | None:
+    """The branch ``hermes update`` follows when ``updates.track_current_branch`` is on.
+
+    Install provenance is the checkout itself — ``origin`` is the repo it was cloned from
+    and the current branch is the branch it was cloned at — so the update follows whatever
+    branch the checkout is on (main, feature forks, custom branches). Returns ``None``
+    when an explicit ``--branch``/``--channel`` was given, the option is off, this install
+    already chose a channel with ``--set-channel`` (that choice is its consent to a
+    specific source), the checkout is detached (no current branch), or the config read
+    fails — callers then fall back to the standard channel resolution. A checkout without
+    its own ``.git`` (a zip install) returns ``None`` too: bare git would walk up and
+    name a foreign parent repo's branch.
+    """
+    if branch_explicit or getattr(args, "branch", None):
+        return None
+    if (channel if channel is not None else getattr(args, "channel", None)) is not None:
+        return None
+    from hermes_cli.config import InvalidUserConfigError, load_config
+    from hermes_cli.update_channel import channel_record
+
+    try:
+        enabled = _uc()._updates_config().get("track_current_branch", True)
+        chosen_channel = channel_record(load_config(), _uc()._m().PROJECT_ROOT).get("channel")
+    except InvalidUserConfigError:
+        return None
+    if not enabled or chosen_channel is not None:
+        return None
+    if not (_uc()._m().PROJECT_ROOT / ".git").exists():
+        # A zip install has no repo of its own; bare git would walk up and name
+        # some unrelated parent repo's branch.
+        return None
+    return _uc()._git_run(git_cmd, ["branch", "--show-current"]).stdout.strip() or None
+
+
+def fetch_compare_branch(git_cmd: list[str], root: Path, branch: str, depth_args: list[str], *,
+                         prefer_upstream: bool = True):
     """Fetch only ``branch`` and return ``(fetch_result, compare_ref)``.
 
     A bare ``git fetch <remote>`` pulls every ref, and this repo has thousands of auto-generated
     branches. ``main`` prefers upstream as the canonical reference; other branches go straight
     to origin, because a fork's branch usually has no upstream counterpart.
+    ``prefer_upstream=False`` (``updates.track_current_branch``) skips the upstream preference
+    even for ``main``: the update follows whatever branch the checkout is on.
     """
-    if branch == "main":
+    if prefer_upstream and branch == "main":
         # A local probe (~6 ms) spares non-fork installs a failed network fetch (~0.3-1 s).
         if _git(git_cmd, root, ["remote", "get-url", "upstream"]).returncode == 0:
             fetch_result = _fetch(git_cmd, root, depth_args, "upstream", branch)
@@ -228,12 +292,15 @@ def report_rev_list_verdict(git_cmd: list[str], root: Path, compare_branch: str)
     print(f"  Run '{recommended_update_command()}' to install.")
 
 
-def select_apply_target(args, branch: str, request: dict, *, git_cmd, stop) -> tuple:
+def select_apply_target(args, branch: str, request: dict, *, git_cmd, stop,
+                        branch_pinned: bool = False) -> tuple:
     """Resolve the update's target before any tree write: ``(target_ref, release_sha,
     target_is_head, repository)``; records branch/expected_sha/retirement on ``request``.
 
     ``target_is_head`` means an unchosen default subscription is already past the release,
     so HEAD itself is the target. Exits 1 (after ``stop()``) when the channel is unresolvable.
+    ``branch_pinned`` (``updates.track_current_branch``) means the caller already fixed the
+    branch to the checkout's own, so the channel system is skipped like an explicit ``--branch``.
     """
     from copy import deepcopy
 
@@ -243,7 +310,7 @@ def select_apply_target(args, branch: str, request: dict, *, git_cmd, stop) -> t
     from hermes_cli.update_channel import channel_record, rides_default_channel
     from hermes_cli.update_cmd_common import _record_stop
 
-    if getattr(args, "branch", None):
+    if branch_pinned or getattr(args, "branch", None):
         return f"origin/{branch}", None, False, None
     root = _uc()._m().PROJECT_ROOT
     selected = _uc()._update_run_channel(args)

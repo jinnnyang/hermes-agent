@@ -625,7 +625,11 @@ def _update_via_zip(args, *, had_desktop_app_before_update: bool = False,
     from hermes_cli.update_cmd import _m, _complete_source_update
     # The static archive would silently ignore --branch — the exact silent-divergence bug it exists to
     # prevent. Refuse rather than lie.
-    branch = _m()._resolve_update_branch(args)
+    # completion_request carries the branch the caller actually targeted (an explicit
+    # --branch, or the checkout's own under updates.track_current_branch); resolving from
+    # bare args would read a tracked non-main branch back as "main" and silently swap the
+    # fork checkout for upstream main.
+    branch = (completion_request or {}).get("branch") or _m()._resolve_update_branch(args)
     if branch != "main":
         print(f"✗ --branch={branch} is not supported on the Windows ZIP-fallback update path.")
         print(

@@ -646,11 +646,11 @@ def _cmd_update_check(branch: str = "main", *, branch_explicit: bool = False, ch
     _map_ssl_cert_file_for_git(git_cmd)
     _check.clear_git_debris(root)
 
-    selected_channel = _source_update_channel(channel=channel, branch_explicit=branch_explicit)
-    if not branch_explicit:
-        branch = _check.channel_compare_branch(selected_channel, git_cmd, root)
-        if branch is None:
-            return
+    resolved_branch, from_tracking = _check.resolve_check_branch(
+        git_cmd, root, channel=channel, branch_explicit=branch_explicit, default_branch=branch)
+    if resolved_branch is None:
+        return
+    branch = resolved_branch
 
     # Installer checkouts are shallow (`git clone --depth 1`). A plain fetch would unshallow
     # the repo (the exact cost the shallow clone avoided) and rev-list would then report a
@@ -658,6 +658,7 @@ def _cmd_update_check(branch: str = "main", *, branch_explicit: bool = False, ch
     is_shallow = _check.is_shallow_repository(git_cmd, root)
     fetch_result, compare_branch = _check.fetch_compare_branch(
         git_cmd, root, branch, ["--depth", "1"] if is_shallow else [],
+        prefer_upstream=not from_tracking,
     )
     if fetch_result.returncode != 0:
         _print_fetch_failure(fetch_result.stderr, git_cmd=git_cmd, root=root)
@@ -1835,10 +1836,12 @@ def _cmd_update_impl(args, gateway_mode: bool):
         opts, _pre_update_plan, pre_update_snapshot_id, _windows_gateway_resume,
         had_desktop_app_before_update, gateway_mode)
     branch = _m()._resolve_update_branch(args)
+    tracked_branch, branch = _check.resolve_tracked_branch(args, branch, git_cmd)
     completion_request["branch"] = branch
     target_ref, release_sha, target_is_head, target_repository = _check.select_apply_target(
         args, branch, completion_request, git_cmd=None if use_zip_update else git_cmd,
-        stop=lambda: _m()._resume_windows_gateways_after_update(_windows_gateway_resume))
+        stop=lambda: _m()._resume_windows_gateways_after_update(_windows_gateway_resume),
+        branch_pinned=tracked_branch is not None)
     branch = completion_request["branch"]
 
     if use_zip_update:
