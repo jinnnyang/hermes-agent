@@ -66,6 +66,70 @@ for `install.ps1`, or set `HERMES_INSTALL_CHANNEL=main` before an
 Windows Store, MSIX and bundled desktop installs are unaffected; their channel
 is baked into the package (see below).
 
+### Following your install's own branch
+
+Every git checkout remembers where it came from: `origin` is the repository it
+was cloned from, and the checked-out branch is the branch it was installed at.
+With branch tracking on (the default), `hermes update` uses exactly that pair —
+it fetches `origin/<current branch>` and moves the checkout onto it. Install
+from a fork's branch and updates keep coming from that fork's branch:
+
+```bash
+git remote get-url origin        # https://github.com/yourname/hermes-agent.git
+git branch --show-current        # your-branch
+hermes update                    # fetches origin/your-branch from that repository
+```
+
+This also holds for `main`: a checkout of a fork's `main` updates from the
+fork's `origin/main`, not from an `upstream` remote the channel default would
+treat as canonical. Same repository, same branch — what you installed is what
+you get. Fork maintainers rely on this: rebase your branch onto upstream
+`main`, and every install sitting on that branch picks the rebase up with a
+plain `hermes update`.
+
+Turn tracking off to restore the channel behavior (published releases for
+official checkouts, `main` for forks and mirrors):
+
+```yaml
+updates:
+  track_current_branch: false
+```
+
+How branch tracking interacts with the rest of the updater:
+
+- `--branch NAME` and `--channel CHANNEL` still win for the run they are passed
+  to, and a channel this install already chose with `--set-channel` keeps being
+  followed; tracking only picks the default target for installs riding their
+  default channel.
+- A detached checkout (no current branch) falls back to channel resolution, and
+  non-git installs (Docker, Nix, packages) never track a branch at all.
+- The tracked branch must exist on `origin`. If it was deleted or renamed in
+  the repository, `hermes update --check` reports the fetch failure — recreate
+  the branch there or switch the checkout to one that exists.
+- Local edits are handled like any update: dirty tracked files and untracked
+  files are auto-stashed before the pull (see "Local source changes" under
+  `hermes update` in the [CLI reference](../reference/cli-commands.md)).
+
+#### Maintaining a tracked branch
+
+Maintainers of a fork or a custom branch keep that branch rebased on the
+official repository's `main`; every install on the branch then receives the
+rebase as an ordinary update.
+
+```bash
+git fetch <official-remote>              # e.g. origin, or an `upstream` remote
+git switch <your-branch>
+git rebase <official-remote>/main
+git push --force-with-lease origin <your-branch>
+```
+
+A rebase rewrites history, so the maintainer's push uses `--force-with-lease`
+(never a bare `--force`). Installs are unaffected by the rewrite itself:
+`hermes update` fetches `origin/<your-branch>` and moves the checkout onto the
+new tip like any other update. Stacked branches — a documentation branch on
+top of a feature branch, for example — rebase onto the branch below them, in
+stack order, and push with the same `--force-with-lease`.
+
 ### Bundled desktop updates
 
 On Windows, the sideload app checks the registered App Installer source. Apply
